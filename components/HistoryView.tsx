@@ -1,24 +1,45 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { DailyRecord, FoodDef, AppSettings } from '../types';
-import { calculateDailyStats } from '../services/storage';
-import { Calendar as CalendarIcon, AlertTriangle, Scale, Download, X, FileDown, Cookie, ChevronLeft, ChevronRight, Flame, Droplet, Sprout, Syringe } from 'lucide-react';
+import { calculateDailyStats, markRecordsAsBackedUp } from '../services/storage';
+import { Calendar as CalendarIcon, AlertTriangle, Scale, X, CloudUpload, Cookie, ChevronLeft, ChevronRight, Flame, Droplet, Loader2, Check } from 'lucide-react';
 
 interface Props {
   records: DailyRecord[];
   foods: FoodDef[];
   settings: AppSettings;
   onSelectDate: (date: string) => void;
+  onRefresh: () => Promise<void>;
 }
 
 const URINE_ANCHORS = ['1元', '50元', '半拳', '一拳', '巨大'];
 const WEEK_DAYS = ['日', '一', '二', '三', '四', '五', '六'];
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx9LlsY_4-J-7ZVDxDXQEMdV6RnDghlVK8YZXMtJlk1l8KBnmbhnEtAI1frsqD8NKWe/exec";
 
-const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate }) => {
-  // --- Export State ---
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [exportStartDate, setExportStartDate] = useState('');
-  const [exportEndDate, setExportEndDate] = useState('');
+// Helper moved outside to allow state initialization
+const formatDateString = (date: Date): string => {
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - (offset * 60 * 1000));
+  return local.toISOString().split('T')[0];
+};
 
+const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate, onRefresh }) => {
+  // --- Export/Backup State ---
+  const [showBackupModal, setShowBackupModal] = useState(false);
+  
+  // Initialize with default range (1st of month to Today) so the button can reflect status immediately
+  const [backupStartDate, setBackupStartDate] = useState(() => {
+    const today = new Date();
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+    return formatDateString(firstDay);
+  });
+  const [backupEndDate, setBackupEndDate] = useState(() => {
+    return formatDateString(new Date());
+  });
+
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
+  
   // --- Calendar State ---
   const [currentMonth, setCurrentMonth] = useState(new Date());
   // Default selected date to today or the latest record date
@@ -47,12 +68,6 @@ const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate }
       if (startIdx !== -1) return startIdx + 0.5;
     }
     return 2; 
-  };
-
-  const formatDateString = (date: Date): string => {
-    const offset = date.getTimezoneOffset();
-    const local = new Date(date.getTime() - (offset * 60 * 1000));
-    return local.toISOString().split('T')[0];
   };
 
   const getDaysInMonth = (date: Date) => {
@@ -176,56 +191,116 @@ const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate }
   }, [records, selectedDate]);
 
 
-  const handleOpenExport = () => {
+  // --- Cloud Backup Logic ---
+
+  const handleOpenBackup = () => {
+    // Reset dates to current month range when opening
     const today = new Date();
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-    setExportStartDate(formatDateString(firstDay));
-    setExportEndDate(formatDateString(today));
-    setShowExportModal(true);
+    
+    setBackupStartDate(formatDateString(firstDay));
+    setBackupEndDate(formatDateString(today));
+    
+    setShowBackupModal(true);
+    setUploadSuccess(false);
   };
 
-  const handleExport = () => {
-    const filtered = records.filter(r => r.date >= exportStartDate && r.date <= exportEndDate);
+  // Prepare records for backup and detect sync status
+  const pendingBackupRecords = useMemo(() => {
+      if (!backupStartDate || !backupEndDate) return [];
+      
+      const inRange = records.filter(r => r.date >= backupStartDate && r.date <= backupEndDate);
+      
+      // Filter for "Dirty" records: No backup time OR lastModified is newer than backup time
+      return inRange.filter(r => {
+          if (!r.lastBackupTime) return true;
+          const modTime = r.lastModified || 0;
+          return modTime > r.lastBackupTime;
+      });
+  }, [records, backupStartDate, backupEndDate]);
+
+  const handleCloudUpload = async (e: React.MouseEvent) => {
+    e.preventDefault(); // Prevent accidental navigation if inside a form
+    
+    const filtered = records.filter(r => r.date >= backupStartDate && r.date <= backupEndDate);
     filtered.sort((a, b) => a.date.localeCompare(b.date));
 
     if (filtered.length === 0) {
-        alert('選定的期間內沒有紀錄可匯出');
+        alert('選定的期間內沒有紀錄可上傳');
         return;
     }
 
-    let csvContent = '\uFEFF'; 
-    csvContent += '體重(kg),日期,總熱量(kcal),副食熱量佔比(%),總水量(ml),尿塊大小,大便狀態,備註\n';
+    setIsUploading(true);
 
-    filtered.forEach(r => {
-        const stats = calculateDailyStats(r, foods);
-        const sideRatio = stats.totalCalories > 0 ? (stats.sideCalories / stats.totalCalories) * 100 : 0;
-        const safeNotes = r.notes ? `"${r.notes.replace(/"/g, '""')}"` : '';
-        
-        const row = [
-            r.weight || '',
-            r.date,
-            stats.totalCalories.toFixed(1),
-            sideRatio.toFixed(1),
-            stats.totalWater.toFixed(1),
-            r.urineSize,
-            r.stoolStatus,
-            safeNotes
-        ].join(',');
-        
-        csvContent += row + '\n';
-    });
+    try {
+        const payload = filtered.map(r => {
+            const stats = calculateDailyStats(r, foods);
+            
+            // Calculate Snack Info
+            const totalCals = stats.totalCalories;
+            const sideCals = stats.sideCalories;
+            const ratio = totalCals > 0 ? (sideCals / totalCals * 100).toFixed(0) : "0";
+            
+            // Get unique snack names
+            const snackNames = new Set<string>();
+            if (r.foodIntakes) {
+                r.foodIntakes.forEach(i => {
+                    const f = foods.find(food => food.id === i.foodId);
+                    if (f && (f.type === '零食' || f.type === '副食' as any)) {
+                        snackNames.add(f.name);
+                    }
+                });
+            }
+            const namesStr = Array.from(snackNames).join('、');
+            const snackInfoStr = namesStr ? `${ratio}%, ${namesStr}` : `${ratio}%`;
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `皮寶健康紀錄_${exportStartDate}_to_${exportEndDate}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    setShowExportModal(false);
+            return {
+                date: r.date,
+                weight: r.weight > 0 ? r.weight : "",
+                totalCalories: parseFloat(stats.totalCalories.toFixed(1)),
+                snackInfo: snackInfoStr,
+                totalWater: parseFloat(stats.totalWater.toFixed(1)),
+                urineSize: r.urineSize,
+                stoolStatus: r.stoolStatus,
+                notes: r.notes || ""
+            };
+        });
+
+        // Use 'no-cors' mode as standard Google Apps Script Web App endpoints often have CORS issues
+        const response = await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'text/plain;charset=utf-8', 
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (result.result === 'success') {
+            // Update local state to mark these records as backed up
+            const idsToUpdate = filtered.map(r => r.id);
+            await markRecordsAsBackedUp(idsToUpdate);
+            
+            // Show success and refresh data WITHOUT reloading the page
+            setUploadSuccess(true);
+            setTimeout(async () => {
+                await onRefresh();
+                setShowBackupModal(false);
+                setUploadSuccess(false);
+            }, 1500);
+        } else {
+            throw new Error(result.error || 'Upload failed');
+        }
+
+    } catch (error) {
+        console.error("Upload failed", error);
+        alert('上傳失敗，請檢查網路連線或稍後再試。');
+    } finally {
+        setIsUploading(false);
+    }
   };
+
 
   const renderCalendarDays = () => {
     const { days, firstDay, year, month } = getDaysInMonth(currentMonth);
@@ -268,17 +343,25 @@ const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate }
     }
     return daysArray;
   };
+  
+  const hasPendingBackups = pendingBackupRecords.length > 0;
 
   return (
     <div className="pb-24 p-4 max-w-4xl mx-auto relative">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-2xl font-bold text-slate-800">歷史紀錄</h2>
         <button 
-            onClick={handleOpenExport}
-            className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-lg transition text-sm font-medium border border-slate-200 shadow-sm"
+            type="button"
+            onClick={handleOpenBackup}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition text-sm font-bold shadow-sm ${
+                hasPendingBackups 
+                ? 'bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 shadow-amber-200/50 animate-pulse' 
+                : 'bg-[#6E96B8] hover:bg-[#5D84A6] text-white shadow-[#6E96B8]/20'
+            }`}
         >
-            <Download size={18} />
-            匯出
+            {hasPendingBackups && <AlertTriangle size={18} className="text-amber-600" />}
+            {!hasPendingBackups && <CloudUpload size={18} />}
+            雲端備份
         </button>
       </div>
 
@@ -612,56 +695,125 @@ const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate }
         </div>
       </div>
 
-      {showExportModal && (
+      {showBackupModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-xl animate-in fade-in zoom-in duration-200">
                 <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                        <FileDown size={20} className="text-[#6E96B8]"/>
-                        匯出 CSV
+                        <CloudUpload size={20} className="text-[#6E96B8]"/>
+                        上傳至 Google Sheets
                     </h3>
                     <button 
-                        onClick={() => setShowExportModal(false)}
+                        type="button"
+                        onClick={() => setShowBackupModal(false)}
                         className="text-slate-400 hover:text-slate-600"
+                        disabled={isUploading}
                     >
                         <X size={20} />
                     </button>
                 </div>
-                <div className="p-6 space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-600 mb-1">開始日期</label>
-                        <input 
-                            type="date"
-                            value={exportStartDate}
-                            onChange={(e) => setExportStartDate(e.target.value)}
-                            className="w-full p-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-[#6E96B8] bg-white"
-                        />
+                
+                {uploadSuccess ? (
+                    <div className="p-8 flex flex-col items-center justify-center text-center gap-4 animate-in fade-in">
+                        <div className="w-16 h-16 rounded-full bg-[#5CA579]/10 flex items-center justify-center text-[#5CA579]">
+                            <Check size={32} strokeWidth={3} />
+                        </div>
+                        <h4 className="text-lg font-bold text-slate-700">上傳成功！</h4>
+                        <p className="text-slate-500 text-sm">資料已成功同步至雲端試算表。</p>
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-600 mb-1">結束日期</label>
-                        <input 
-                            type="date"
-                            value={exportEndDate}
-                            onChange={(e) => setExportEndDate(e.target.value)}
-                            className="w-full p-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-[#6E96B8] bg-white"
-                        />
+                ) : (
+                    <>
+                    <div className="p-6 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1">開始日期</label>
+                                <input 
+                                    type="date"
+                                    value={backupStartDate}
+                                    onChange={(e) => setBackupStartDate(e.target.value)}
+                                    className="w-full p-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-[#6E96B8] bg-white text-sm"
+                                    disabled={isUploading}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1">結束日期</label>
+                                <input 
+                                    type="date"
+                                    value={backupEndDate}
+                                    onChange={(e) => setBackupEndDate(e.target.value)}
+                                    className="w-full p-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-[#6E96B8] bg-white text-sm"
+                                    disabled={isUploading}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Status Check */}
+                        <div className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-colors ${
+                            pendingBackupRecords.length > 0 ? 'bg-amber-50 border-amber-100 text-amber-800' : 'bg-slate-50 border-slate-100 text-slate-400'
+                        }`}>
+                             {pendingBackupRecords.length > 0 ? (
+                                 <>
+                                    <div className="flex items-center gap-2 font-bold text-lg">
+                                        <AlertTriangle size={20} className="text-amber-500" />
+                                        {pendingBackupRecords.length} 筆待備份
+                                    </div>
+                                    <div className="text-xs opacity-80 text-center px-4 flex flex-col gap-0.5">
+                                        <span>偵測到新建立或修改過的資料，</span>
+                                        <span>建議立即上傳以保持同步。</span>
+                                    </div>
+                                 </>
+                             ) : (
+                                 <>
+                                     <div className="flex items-center gap-2 font-bold text-lg">
+                                        <Check size={20} />
+                                        皆已備份
+                                     </div>
+                                     <div className="text-xs opacity-70">
+                                         選定區間內的資料與雲端同步。
+                                     </div>
+                                 </>
+                             )}
+                        </div>
                     </div>
-                </div>
-                <div className="p-4 bg-slate-50 flex gap-3">
-                    <button 
-                        onClick={() => setShowExportModal(false)}
-                        className="flex-1 py-2.5 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition"
-                    >
-                        取消
-                    </button>
-                    <button 
-                        onClick={handleExport}
-                        className="flex-1 py-2.5 bg-[#6E96B8] text-white font-medium rounded-lg hover:bg-[#5D84A6] shadow-sm transition flex justify-center items-center gap-2"
-                    >
-                        <Download size={18} />
-                        下載檔案
-                    </button>
-                </div>
+
+                    <div className="p-4 bg-slate-50 flex gap-3">
+                        <button 
+                            type="button"
+                            onClick={() => setShowBackupModal(false)}
+                            className="flex-1 py-3 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition text-sm"
+                            disabled={isUploading}
+                        >
+                            取消
+                        </button>
+                        <button 
+                            type="button"
+                            onClick={handleCloudUpload}
+                            disabled={isUploading || pendingBackupRecords.length === 0}
+                            className={`flex-1 py-3 font-bold rounded-lg shadow-sm transition flex justify-center items-center gap-2 text-sm ${
+                                isUploading 
+                                  ? 'bg-slate-300 text-white cursor-not-allowed'
+                                  : pendingBackupRecords.length > 0 
+                                    ? 'bg-[#6E96B8] text-white hover:bg-[#5D84A6]'
+                                    : 'bg-white text-slate-300 border border-slate-200'
+                            }`}
+                        >
+                            {isUploading ? (
+                                <>
+                                  <Loader2 size={16} className="animate-spin" />
+                                  上傳中...
+                                </>
+                            ) : pendingBackupRecords.length > 0 ? (
+                                <>
+                                  <CloudUpload size={16} />
+                                  一鍵上傳
+                                </>
+                            ) : (
+                                '無需上傳'
+                            )}
+                        </button>
+                    </div>
+                    </>
+                )}
             </div>
         </div>
       )}

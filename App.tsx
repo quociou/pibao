@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { fetchFoods, fetchRecords, saveRecordToRemote, saveFoodToRemote, deleteFoodFromRemote, saveFoodsOrderToRemote, deleteRecordFromRemote, fetchSettings, saveSettings } from './services/storage';
 import { FoodDef, DailyRecord, AppSettings } from './types';
@@ -64,6 +65,15 @@ const App: React.FC = () => {
   }, [records, settings.targetWeight]);
 
   // --- Actions ---
+
+  const refreshRecords = async () => {
+    try {
+      const loadedRecords = await fetchRecords();
+      setRecords(loadedRecords);
+    } catch (error) {
+      console.error("Failed to refresh records", error);
+    }
+  };
 
   const handleSaveSettings = async (newSettings: AppSettings) => {
       await saveSettings(newSettings);
@@ -230,6 +240,7 @@ const App: React.FC = () => {
             foods={foods} 
             settings={settings}
             onSelectDate={navigateToDateFromHistory}
+            onRefresh={refreshRecords}
           />
         )}
 

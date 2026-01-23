@@ -1,3 +1,4 @@
+
 export type FoodType = '飼料' | '罐頭' | '零食';
 
 export interface FoodDef {
@@ -49,6 +50,10 @@ export interface DailyRecord {
   
   // Other
   notes: string;
+
+  // Sync / Backup Metadata
+  lastModified?: number; // Timestamp when record was last changed locally
+  lastBackupTime?: number; // Timestamp when record was last successfully uploaded
 }
 
 // Helper interface for display

@@ -1,3 +1,4 @@
+
 import { DailyRecord, FoodDef, WaterIntake, AppSettings } from '../types';
 import { db } from './firebase';
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, getDoc } from 'firebase/firestore';
@@ -155,11 +156,32 @@ export const fetchRecords = async (): Promise<DailyRecord[]> => {
 
 export const saveRecordToRemote = async (record: DailyRecord): Promise<void> => {
   try {
-    await setDoc(doc(db, "records", record.id), sanitizeForFirestore(record));
+    // Automatically update lastModified timestamp
+    const updatedRecord = {
+        ...record,
+        lastModified: Date.now()
+    };
+    await setDoc(doc(db, "records", record.id), sanitizeForFirestore(updatedRecord));
   } catch (error) {
     console.error("Error saving record:", error);
     throw error;
   }
+};
+
+// Batch update to mark records as backed up
+export const markRecordsAsBackedUp = async (recordIds: string[]): Promise<void> => {
+    try {
+        const batch = writeBatch(db);
+        const now = Date.now();
+        recordIds.forEach(id => {
+            const ref = doc(db, "records", id);
+            batch.update(ref, { lastBackupTime: now });
+        });
+        await batch.commit();
+    } catch (error) {
+        console.error("Error marking records as backed up:", error);
+        throw error;
+    }
 };
 
 export const deleteRecordFromRemote = async (id: string): Promise<void> => {
