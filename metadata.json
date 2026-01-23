@@ -1,0 +1,5 @@
+{
+  "name": "Pi-Bao Health Tracker",
+  "description": "A dedicated health tracking application for Pi-Bao (皮寶) to monitor diet, water intake, weight, and excretion patterns.",
+  "requestFramePermissions": []
+}
