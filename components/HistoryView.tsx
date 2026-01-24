@@ -239,7 +239,8 @@ const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate, 
             // Calculate Snack Info
             const totalCals = stats.totalCalories;
             const sideCals = stats.sideCalories;
-            const ratio = totalCals > 0 ? (sideCals / totalCals * 100).toFixed(0) : "0";
+            // Changed from toFixed(0) to toFixed(1) to match UI display and prevent 0.7% -> 1% rounding
+            const ratio = totalCals > 0 ? (sideCals / totalCals * 100).toFixed(1) : "0";
             
             // Get unique snack names
             const snackNames = new Set<string>();
