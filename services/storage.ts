@@ -16,7 +16,7 @@ const INITIAL_FOODS: FoodDef[] = [
   { id: 'f7', name: '雞胸肉', type: '零食', caloriesPerGram: 1.19, waterContentPercent: 60, order: 6 },
 ];
 
-const DEFAULT_NOTE_PRESETS = ['換砂', '點藥', '就醫', '健檢', '咳嗽', '嘔吐', '舔嘴唇', '精神差', '食慾差', '肚子翻攪'];
+const DEFAULT_NOTE_PRESETS = ['換砂', '洗飼料機', '點藥', '就醫', '健檢', '咳嗽', '嘔吐', '舔嘴唇', '精神差', '食慾差', '肚子翻攪'];
 
 // Helper to remove undefined fields which Firestore doesn't like
 const sanitizeForFirestore = <T extends object>(data: T): T => {
@@ -51,7 +51,8 @@ export const fetchSettings = async (): Promise<AppSettings> => {
         defaultEvaporation: 0,
         notePresets: DEFAULT_NOTE_PRESETS,
         litterInterval: 14, // Default to 14 days
-        medicationInterval: 30 // Default to 30 days
+        medicationInterval: 30, // Default to 30 days
+        feederInterval: 30 // Default to 30 days
       };
       await setDoc(docRef, sanitizeForFirestore(defaultSettings));
       return defaultSettings;
@@ -65,7 +66,8 @@ export const fetchSettings = async (): Promise<AppSettings> => {
         defaultEvaporation: 0,
         notePresets: DEFAULT_NOTE_PRESETS,
         litterInterval: 14,
-        medicationInterval: 30
+        medicationInterval: 30,
+        feederInterval: 30
     };
   }
 };

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { FoodDef, FoodType, AppSettings, DailyRecord } from '../types';
 import { Plus, Trash2, Edit2, Save, ArrowUp, ArrowDown, GripVertical, Check, X, Star, Activity, Database, Wind, Droplet, Flame, Scale, Sprout, AlertTriangle, Syringe, Bell, CalendarClock } from 'lucide-react';
@@ -178,6 +179,53 @@ const FoodManager: React.FC<Props> = ({ foods, settings, records, latestWeight, 
   const expectedMedDate = useMemo(() => 
     calculateExpectedDate(medicationStats.lastMedDate, localSettings.medicationInterval),
   [medicationStats.lastMedDate, localSettings.medicationInterval]);
+
+  // --- Feeder Wash Calculations ---
+  const feederStats = useMemo(() => {
+    const feederRecords = records
+      .filter(r => r.notes && r.notes.includes('洗飼料機'))
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    const lastFeederDate = feederRecords[0]?.date || null;
+    let cycles: number[] = [];
+
+    // Calculate cycles
+    const limit = Math.min(feederRecords.length, 7); 
+    if (feederRecords.length >= 2) {
+        for (let i = 0; i < limit - 1; i++) {
+            const d1 = new Date(feederRecords[i].date);
+            const d2 = new Date(feederRecords[i+1].date);
+            const diffTime = Math.abs(d1.getTime() - d2.getTime());
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            cycles.push(diffDays);
+        }
+    }
+
+    const averageCycle = cycles.length > 0 
+        ? (cycles.reduce((a, b) => a + b, 0) / cycles.length).toFixed(1)
+        : '--';
+
+    let daysSinceLast = 0;
+    if (lastFeederDate) {
+        const today = new Date();
+        const last = new Date(lastFeederDate);
+        const t1 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const t2 = new Date(last.getFullYear(), last.getMonth(), last.getDate());
+        const diffTime = t1.getTime() - t2.getTime();
+        daysSinceLast = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    }
+
+    return { lastFeederDate, averageCycle, daysSinceLast };
+  }, [records]);
+
+  const isFeederOverdueToday = useMemo(() => {
+      if (!localSettings.feederInterval || !feederStats.lastFeederDate) return false;
+      return feederStats.daysSinceLast > localSettings.feederInterval;
+  }, [localSettings.feederInterval, feederStats.lastFeederDate, feederStats.daysSinceLast]);
+
+  const expectedFeederDate = useMemo(() => 
+    calculateExpectedDate(feederStats.lastFeederDate, localSettings.feederInterval),
+  [feederStats.lastFeederDate, localSettings.feederInterval]);
 
 
   // --- Chart Data Preparation ---
@@ -587,7 +635,7 @@ const FoodManager: React.FC<Props> = ({ foods, settings, records, latestWeight, 
                 </div>
             </section>
 
-             {/* B. Reminders (Litter & Medication) */}
+             {/* B. Reminders (Litter & Medication & Feeder) */}
              <section className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
                 <h3 className="flex items-center gap-2 text-lg font-bold text-slate-800 mb-4">
                     <Bell className="text-[#6E96B8]" size={20} /> 提醒
@@ -644,7 +692,58 @@ const FoodManager: React.FC<Props> = ({ foods, settings, records, latestWeight, 
                     </div>
                 </div>
 
-                {/* 2. Medication */}
+                {/* 2. Feeder Washing (New) */}
+                <div className="mb-6 pb-6 border-b border-slate-100 last:border-0 last:pb-0 last:mb-0">
+                    <div className="flex justify-between items-center mb-3">
+                         <h4 className="text-sm font-bold text-slate-700">
+                            洗飼料機
+                         </h4>
+                         {isFeederOverdueToday && (
+                             <span className="text-[#DA6C6C] text-xs flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded-full border border-red-100 animate-pulse font-bold">
+                                 <AlertTriangle size={12} /> 該洗飼料機摟!
+                             </span>
+                         )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                        {/* Top Left: Last Wash */}
+                        <div className="bg-[#ADC4CE]/20 rounded-xl p-2 border border-[#ADC4CE]/50 flex flex-col items-center justify-center h-20">
+                            <span className="text-[10px] text-slate-500 mb-0.5">上次清洗</span>
+                            <span className="text-sm font-bold text-[#4B7C91]">{feederStats.lastFeederDate ? feederStats.lastFeederDate.substring(5) : '--'}</span>
+                        </div>
+
+                        {/* Top Right: Average Cycle */}
+                        <div className="bg-[#ADC4CE]/20 rounded-xl p-2 border border-[#ADC4CE]/50 flex flex-col items-center justify-center h-20">
+                            <span className="text-[10px] text-slate-500 mb-0.5">平均週期</span>
+                            <span className="text-sm font-bold text-[#4B7C91]">{feederStats.averageCycle} <span className="text-[10px] font-normal text-slate-400">天</span></span>
+                        </div>
+
+                         {/* Bottom Left: Expected Date */}
+                         <div className="bg-[#ADC4CE]/20 rounded-xl p-2 border border-[#ADC4CE]/50 flex flex-col items-center justify-center h-20">
+                            <span className="text-[10px] text-slate-500 mb-0.5 flex items-center gap-1">
+                                <CalendarClock size={12} /> 預計清洗
+                            </span>
+                            <span className="text-sm font-bold text-[#4B7C91]">
+                                {expectedFeederDate}
+                            </span>
+                        </div>
+
+                        {/* Bottom Right: Interval Input */}
+                        <div className="bg-[#FAFDFF] rounded-xl border border-slate-200 p-2 flex flex-col items-center justify-center h-20">
+                            <span className="text-[10px] text-slate-500 mb-0.5 font-bold">預設天數</span>
+                            <input 
+                                type="number"
+                                value={localSettings.feederInterval || ''}
+                                onChange={(e) => handleSettingsChange('feederInterval', parseFloat(e.target.value))}
+                                onBlur={handleBlurSave}
+                                className="w-full text-center bg-[#FAFDFF] rounded-lg py-1 text-lg font-bold text-slate-700 outline-none placeholder:text-slate-300"
+                                placeholder="天數"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                {/* 3. Medication */}
                 <div>
                     <div className="flex justify-between items-center mb-3">
                          <h4 className="text-sm font-bold text-slate-700">

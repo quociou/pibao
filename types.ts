@@ -73,4 +73,5 @@ export interface AppSettings {
   notePresets?: string[];
   litterInterval?: number; // Days between litter changes
   medicationInterval?: number; // Days between medication
+  feederInterval?: number; // Days between feeder washing
 }

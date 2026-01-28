@@ -153,6 +153,32 @@ const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate, 
     return map;
   }, [records]);
 
+  // Build a map of date -> days since last feeder wash
+  const dailyFeederAgeMap = useMemo(() => {
+    const map = new Map<string, number>();
+    const sortedRecords = [...records].sort((a, b) => a.date.localeCompare(b.date));
+    
+    let lastFeederDate: string | null = null;
+
+    sortedRecords.forEach(r => {
+        const hasFeederWash = r.notes && r.notes.includes('洗飼料機');
+        if (hasFeederWash) {
+            lastFeederDate = r.date;
+            map.set(r.date, 0);
+        } else if (lastFeederDate) {
+            const d1 = new Date(r.date);
+            const d2 = new Date(lastFeederDate);
+            const diffTime = Math.abs(d1.getTime() - d2.getTime());
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            map.set(r.date, diffDays);
+        } else {
+            map.set(r.date, -1);
+        }
+    });
+
+    return map;
+  }, [records]);
+
   const indicatorsMap = useMemo(() => {
     const map: Record<string, { pink: boolean, green: boolean, yellow: boolean, orange: boolean, blue: boolean }> = {};
     
@@ -486,7 +512,10 @@ const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate, 
                   const daysSinceMed = dailyMedicationAgeMap.get(record.date) ?? -1;
                   const isMedicationOverdue = settings.medicationInterval ? (daysSinceMed > settings.medicationInterval && daysSinceMed !== -1) : false;
 
-                  const hasAnyAlert = isLowWater || isSmallUrine || isHighSideRatio || isAbnormalStool || isLitterOverdue || isMedicationOverdue;
+                  const daysSinceFeeder = dailyFeederAgeMap.get(record.date) ?? -1;
+                  const isFeederOverdue = settings.feederInterval ? (daysSinceFeeder > settings.feederInterval && daysSinceFeeder !== -1) : false;
+
+                  const hasAnyAlert = isLowWater || isSmallUrine || isHighSideRatio || isAbnormalStool || isLitterOverdue || isMedicationOverdue || isFeederOverdue;
                   
                   let cardClasses = "p-4 rounded-xl shadow-sm border transition cursor-pointer flex flex-col group relative ";
                   if (hasAnyAlert) {
@@ -547,6 +576,11 @@ const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate, 
                                 {isLitterOverdue && (
                                     <div className="text-[#DA6C6C] text-[10px] flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded-full border border-red-100 animate-pulse font-bold">
                                         <AlertTriangle size={12} className="shrink-0" /> 該換砂摟!
+                                    </div>
+                                )}
+                                {isFeederOverdue && (
+                                    <div className="text-[#DA6C6C] text-[10px] flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded-full border border-red-100 animate-pulse font-bold">
+                                        <AlertTriangle size={12} className="shrink-0" /> 該洗飼料機摟!
                                     </div>
                                 )}
                                 {isMedicationOverdue && (
