@@ -3,7 +3,7 @@ import { getAnalytics } from "firebase/analytics";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCyz8eakCVFkSlNOlVMvEst2lJFWsdBFes",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: "pibao-f39f9.firebaseapp.com",
   projectId: "pibao-f39f9",
   storageBucket: "pibao-f39f9.firebasestorage.app",
