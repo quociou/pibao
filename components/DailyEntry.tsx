@@ -28,7 +28,7 @@ const DailyEntry: React.FC<Props> = ({ foods, date, existingRecord, settings, on
   const [foodIntakes, setFoodIntakes] = useState<FoodIntake[]>([]);
   const [waterIntakes, setWaterIntakes] = useState<WaterIntake[]>([]);
   const [urineSize, setUrineSize] = useState<UrineSize>('半拳');
-  const [stoolStatus, setStoolStatus] = useState<StoolStatus>('正常');
+  const [stoolStatus, setStoolStatus] = useState<StoolStatus>('未大便');
   const [notes, setNotes] = useState('');
 
   // Editing States
@@ -78,7 +78,7 @@ const DailyEntry: React.FC<Props> = ({ foods, date, existingRecord, settings, on
     let newFoodIntakes: FoodIntake[] = [];
     let newWaterIntakes: WaterIntake[] = [];
     let newUrine: UrineSize = '半拳';
-    let newStool: StoolStatus = '正常';
+    let newStool: StoolStatus = '未大便';
     let newNotes = '';
 
     if (existingRecord) {

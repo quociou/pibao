@@ -8,6 +8,7 @@ interface Props {
   records: DailyRecord[];
   foods: FoodDef[];
   settings: AppSettings;
+  initialDate: string;
   onSelectDate: (date: string) => void;
   onRefresh: () => Promise<void>;
 }
@@ -23,7 +24,7 @@ const formatDateString = (date: Date): string => {
   return local.toISOString().split('T')[0];
 };
 
-const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate, onRefresh }) => {
+const HistoryView: React.FC<Props> = ({ records, foods, settings, initialDate, onSelectDate, onRefresh }) => {
   // --- Export/Backup State ---
   const [showBackupModal, setShowBackupModal] = useState(false);
   
@@ -41,9 +42,11 @@ const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate, 
   const [uploadSuccess, setUploadSuccess] = useState(false);
   
   // --- Calendar State ---
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  // Default selected date to today or the latest record date
-  const [selectedDate, setSelectedDate] = useState<string>('');
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    return initialDate ? new Date(initialDate) : new Date();
+  });
+  // Default selected date to initialDate
+  const [selectedDate, setSelectedDate] = useState<string>(initialDate);
 
   // Initialize selectedDate on load
   useEffect(() => {
@@ -216,6 +219,11 @@ const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate, 
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [records, selectedDate]);
 
+  const latestRecordDate = useMemo(() => {
+    if (records.length === 0) return null;
+    return records.reduce((max, r) => r.date > max ? r.date : max, records[0].date);
+  }, [records]);
+
 
   // --- Cloud Backup Logic ---
 
@@ -346,8 +354,7 @@ const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate, 
       daysArray.push(
         <button
           key={dateStr}
-          onClick={() => setSelectedDate(dateStr)}
-          onDoubleClick={() => onSelectDate(dateStr)}
+          onClick={() => onSelectDate(dateStr)}
           className={`h-14 flex flex-col items-center justify-start pt-1.5 rounded-lg transition relative ${
              isSelected ? 'bg-[#6E96B8]/10' : 'hover:bg-slate-50'
           }`}
@@ -506,14 +513,16 @@ const HistoryView: React.FC<Props> = ({ records, foods, settings, onSelectDate, 
                   const isHighSideRatio = sideRatio > 10;
                   const isAbnormalStool = record.stoolStatus !== '正常';
                   
+                  const isLatestRecord = record.date === latestRecordDate;
+                  
                   const daysSinceLitter = dailyLitterAgeMap.get(record.date) ?? -1;
-                  const isLitterOverdue = settings.litterInterval ? (daysSinceLitter > settings.litterInterval && daysSinceLitter !== -1) : false;
+                  const isLitterOverdue = isLatestRecord && settings.litterInterval ? (daysSinceLitter > settings.litterInterval && daysSinceLitter !== -1) : false;
 
                   const daysSinceMed = dailyMedicationAgeMap.get(record.date) ?? -1;
-                  const isMedicationOverdue = settings.medicationInterval ? (daysSinceMed > settings.medicationInterval && daysSinceMed !== -1) : false;
+                  const isMedicationOverdue = isLatestRecord && settings.medicationInterval ? (daysSinceMed > settings.medicationInterval && daysSinceMed !== -1) : false;
 
                   const daysSinceFeeder = dailyFeederAgeMap.get(record.date) ?? -1;
-                  const isFeederOverdue = settings.feederInterval ? (daysSinceFeeder > settings.feederInterval && daysSinceFeeder !== -1) : false;
+                  const isFeederOverdue = isLatestRecord && settings.feederInterval ? (daysSinceFeeder > settings.feederInterval && daysSinceFeeder !== -1) : false;
 
                   const hasAnyAlert = isLowWater || isSmallUrine || isHighSideRatio || isAbnormalStool || isLitterOverdue || isMedicationOverdue || isFeederOverdue;
                   

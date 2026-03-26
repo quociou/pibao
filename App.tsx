@@ -239,6 +239,7 @@ const App: React.FC = () => {
             records={records} 
             foods={foods} 
             settings={settings}
+            initialDate={selectedDate}
             onSelectDate={navigateToDateFromHistory}
             onRefresh={refreshRecords}
           />
